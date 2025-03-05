@@ -1,0 +1,89 @@
+# Visual Studio specific
+.vs/
+*.user
+*.suo
+*.cache
+*.csproj.user
+*.dbmdl
+*.log
+
+# Build output
+bin/
+obj/
+*.exe
+*.dll
+*.pdb
+*.cachefile
+
+# User-specific
+*.userosscache
+*.sln.docstates
+*.ide
+
+# Testing
+TestResults/
+*.TestResults
+*.trx
+*.coverage
+*.coveragexml
+
+# Packages
+packages/
+*.nupkg
+*.snupkg
+project.lock.json
+project.assets.json
+paket-files/
+# Include if you have Paket:
+# .paket/
+# paket-files/
+
+# Environment artifacts
+.env
+.env.local
+*.tmp
+*.temp
+*.pid
+*.old
+
+# Logs
+*.log
+
+# Tooling
+.vscode/
+_ReSharper*/
+*.DotSettings.user
+
+# NuGet
+.nuget/
+NUGET_BACKUP/
+*.nupkg
+# If using lock file
+packages.lock.json
+
+# Rider (JetBrains IDE)
+.idea/
+*.sln.iml
+
+# Exclude directories typically created by tooling
+Generated_Code/
+GeneratedFiles/
+node_modules/
+
+# Optional - if you use Python scripts alongside the project
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS specific
+.DS_Store
+
+# Exclude deployment outputs if you copy your EXE/DLL somewhere else
+Deploy/
+Published/

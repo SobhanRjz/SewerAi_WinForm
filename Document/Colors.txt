@@ -1,0 +1,13 @@
+Color Name	Hex Code	RGB	Usage
+Background Dark	      #121212	RGB(18, 18, 18)	Primary background color for dark mode.
+Surface Dark	      #1E1E1E	RGB(30, 30, 30)	Secondary background for cards or panels.
+Primary Green	      #4CAF50	RGB(76, 175, 80)	Primary accent color (buttons, highlights).
+Secondary Green	      #388E3C	RGB(56, 142, 60)	Secondary accent color (hover states).
+Text Light	          #FFFFFF	RGB(255, 255, 255)	Primary text color for readability.
+Text Muted	          #B0B0B0	RGB(176, 176, 176)	Secondary text color for less emphasis.
+Error Red	          #FF4444	RGB(255, 68, 68)	Error messages or warnings.
+Success Green	      #66BB6A	RGB(102, 187, 106)	Success messages or confirmations.
+Warning Yellow	      #FFA726	RGB(255, 167, 38)	Warning messages or alerts.
+Divider Line	      #2C2C2C	RGB(44, 44, 44)	Divider lines between sections.
+Next Button Blue	  #42A5F5	RGB(66, 165, 245)	Color for Next button to indicate progression.
+Back Button Grey	  #757575	RGB(117, 117, 117)	Color for Back button to keep it muted and neutral.
