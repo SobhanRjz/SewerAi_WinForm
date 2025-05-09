@@ -114,12 +114,13 @@ namespace AISewerPipes
                 openFileDialog.InitialDirectory = "C:\\";
                 openFileDialog.Filter = "Video files (*.mp4;*.avi;*.mkv;*.mov;*.wmv;*.mpg)|*.mp4;*.avi;*.mkv;*.mov;*.wmv;*.mpg";
                 openFileDialog.FilterIndex = 1;
-                openFileDialog.RestoreDirectory = true;
+                openFileDialog.RestoreDirectory = false;
+                openFileDialog.Multiselect = true; // Allow multiple file selection
 
                 if (openFileDialog.ShowDialog() == DialogResult.OK)
                 {
-                    string filePath = openFileDialog.FileName;
-                    BrowseTextbox.Text = filePath;
+                    string[] filePaths = openFileDialog.FileNames; // Get all selected file paths
+                    BrowseTextbox.Text = string.Join("; ", filePaths); // Display paths separated by semicolons
                 }
             }
         }
@@ -333,29 +334,118 @@ namespace AISewerPipes
             }
         }
 
+        string GetGlobalPythonPath()
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = "where",
+                    Arguments = "python",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using (Process process = Process.Start(psi))
+                {
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+
+                    // Return the first result
+                    string[] paths = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+                    if (paths.Length > 0 && File.Exists(paths[0]))
+                    {
+                        return paths[0];
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore and return null
+            }
+
+            return null;
+        }
+        public static void ReadJsonFile(string filePath)
+        {
+            try
+            {
+                // Read the JSON file content
+                string jsonContent = File.ReadAllText(filePath);
+
+                // Parse the JSON content into a dynamic object
+                var jsonObject = JsonConvert.DeserializeObject<dynamic>(jsonContent);
+
+                // Example: Print the JSON content
+                Console.WriteLine(jsonObject);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"An error occurred: {ex.Message}");
+            }
+        }
         private void StartAIdetectorButton_Click(object sender, EventArgs e)
         {
-            // Get the video path from the TextBox
+
+            // Read JSON file
+            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "progress_log.json");
+            if (File.Exists(filePath))
+            {
+                string jsonText = File.ReadAllText(filePath);
+                var progressData = JsonConvert.DeserializeObject<ProgressLog>(jsonText);
+                progressData.current_stage = "initialization";
+                progressData.progress = 0;
+                // Serialize the object back to JSON
+                string updatedJsonText = JsonConvert.SerializeObject(progressData, Formatting.Indented);
+
+                // Write the updated JSON back to the file
+                File.WriteAllText(filePath, updatedJsonText);
+            }
+                // Get the video path from the TextBox
             string videoPath = BrowseTextbox.Text;
 
             // Get the directory where the executable is running
             string exeDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            exeDirectory = Directory.GetParent(exeDirectory).Parent.FullName;
 
             // Path to your Python script (assumed to be beside the exe)
-            string pythonScriptPath = Path.Combine(exeDirectory, "DetectDefets_Main.py");
+            string pythonScriptPath = Path.Combine(exeDirectory, "Analyser_Batch.py");
 
             // Path to the Python interpreter inside the `.venv\Scripts\python.exe` beside the exe
-            string pythonInterpreterPath = Path.Combine(exeDirectory, ".venv", "Scripts", "python.exe");
+            string PyPrimaryPath = Directory.GetParent(exeDirectory).Parent.FullName;
+            PyPrimaryPath = Path.Combine(PyPrimaryPath, ".venv", "Scripts", "python.exe");
+
+            string globalPyPath = GetGlobalPythonPath();
+
+
+            string pythonInterpreterPath = null;
+            //pythonInterpreterPath = @"C:\Users\water active\AppData\Local\Programs\Python\Python310\python.exe";
+
+            if (File.Exists(PyPrimaryPath))
+            {
+                pythonInterpreterPath = PyPrimaryPath;
+            }
+            else if (File.Exists(globalPyPath))
+            {
+                pythonInterpreterPath = globalPyPath;
+            }
+            else
+            {
+                pythonInterpreterPath = GetGlobalPythonPath();
+            }
             pythonInterpreterPath = @"C:\Users\sobha\Desktop\detectron2\Code\.venv\Scripts\python.exe";
             pythonScriptPath = @"C:\Users\sobha\Desktop\detectron2\Code\Auto_Sewer_Document\Analyser_Batch.py";
 
-            if (string.IsNullOrEmpty(videoPath) || !System.IO.File.Exists(videoPath))
+            Console.WriteLine(pythonInterpreterPath);
+            
+            if (string.IsNullOrEmpty(videoPath))
             {
                 MessageBox.Show("Please provide a valid video path.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            if (!System.IO.File.Exists(pythonScriptPath))
+            if (!System.IO.File.Exists(pythonInterpreterPath))
             {
                 MessageBox.Show("Python script file does not exist.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
@@ -377,10 +467,8 @@ namespace AISewerPipes
                 {
                     FileName = pythonInterpreterPath,
                     Arguments = $"\"{pythonScriptPath}\" \"{videoPath}\"", // Pass the script path and the video file path
-                    RedirectStandardOutput = false, // No need to redirect output
-                    RedirectStandardError = false, // No need to redirect standard error
-                    UseShellExecute = true, // Use shell execute to hide the command window
-                    CreateNoWindow = false // No window is needed
+                    UseShellExecute = true,      // Must be true to allow shell window
+                    CreateNoWindow = false       // Allow window to be shown
                 };
 
                 // Start the process
