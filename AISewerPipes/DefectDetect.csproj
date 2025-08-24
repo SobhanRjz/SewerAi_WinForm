@@ -190,7 +190,8 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>xcopy /Y /E /I "$(TargetDir)*" "C:\Users\sobha\Desktop\detectron2\Code\Auto_Sewer_Document\Winform Exe"
-</PostBuildEvent>
+    <LangVersion>latest</LangVersion>
+    <PostBuildEvent>
+    </PostBuildEvent>
   </PropertyGroup>
 </Project>

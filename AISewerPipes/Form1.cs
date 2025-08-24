@@ -1,18 +1,22 @@
-﻿using MaterialSkin.Controls;
+﻿using Guna.UI2.WinForms;
+using Guna.UI2.WinForms; // Guna ProgressBar
 using MaterialSkin;
+using MaterialSkin.Controls;
+using Newtonsoft.Json;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Drawing;
-using System.Linq;
-using System.Collections.Generic;
-using static System.Net.Mime.MediaTypeNames;
 using System.Xml.Linq;
-using Guna.UI2.WinForms;
-using Newtonsoft.Json;
-using Guna.UI2.WinForms; // Guna ProgressBar
+using static System.Net.Mime.MediaTypeNames;
+using System.Runtime.InteropServices;
+
+
 #pragma warning disable CS0105 // The using directive for 'System.Windows.Forms' appeared previously in this namespace
 #pragma warning restore CS0105 // The using directive for 'System.Windows.Forms' appeared previously in this namespace
 #pragma warning disable CS0105 // The using directive for 'System.Windows.Forms' appeared previously in this namespace
@@ -20,8 +24,15 @@ using Guna.UI2.WinForms; // Guna ProgressBar
 
 namespace AISewerPipes
 {
+
 	public partial class Form1 : Form
 	{
+        [DllImport("kernel32.dll")]
+        private static extern bool AllocConsole();
+
+        [DllImport("kernel32.dll")]
+        private static extern bool FreeConsole();
+
         public const int WM_NCLBUTTONDOWN = 0xA1;
         public const int HT_CAPTION = 0x2;
 
@@ -41,7 +52,9 @@ namespace AISewerPipes
 
         public Form1()
 		{
-			InitializeComponent();
+            //AllocConsole();
+            Console.WriteLine("Console initialized. Logs will appear here.");
+            InitializeComponent();
             browseButton.Click += BrowseButton_Click;
             PlusImageButton.Click += BrowseButton_Click;
         }
@@ -387,110 +400,167 @@ namespace AISewerPipes
         }
         private void StartAIdetectorButton_Click(object sender, EventArgs e)
         {
-
-            // Read JSON file
-            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "progress_log.json");
-            if (File.Exists(filePath))
-            {
-                string jsonText = File.ReadAllText(filePath);
-                var progressData = JsonConvert.DeserializeObject<ProgressLog>(jsonText);
-                progressData.current_stage = "initialization";
-                progressData.progress = 0;
-                // Serialize the object back to JSON
-                string updatedJsonText = JsonConvert.SerializeObject(progressData, Formatting.Indented);
-
-                // Write the updated JSON back to the file
-                File.WriteAllText(filePath, updatedJsonText);
-            }
-                // Get the video path from the TextBox
-            string videoPath = BrowseTextbox.Text;
-
-            // Get the directory where the executable is running
-            string exeDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            exeDirectory = Directory.GetParent(exeDirectory).Parent.FullName;
-
-            // Path to your Python script (assumed to be beside the exe)
-            string pythonScriptPath = Path.Combine(exeDirectory, "Analyser_Batch.py");
-
-            // Path to the Python interpreter inside the `.venv\Scripts\python.exe` beside the exe
-            string PyPrimaryPath = Directory.GetParent(exeDirectory).Parent.FullName;
-            PyPrimaryPath = Path.Combine(PyPrimaryPath, ".venv", "Scripts", "python.exe");
-
-            string globalPyPath = GetGlobalPythonPath();
-
-
-            string pythonInterpreterPath = null;
-            //pythonInterpreterPath = @"C:\Users\water active\AppData\Local\Programs\Python\Python310\python.exe";
-
-            if (File.Exists(PyPrimaryPath))
-            {
-                pythonInterpreterPath = PyPrimaryPath;
-            }
-            else if (File.Exists(globalPyPath))
-            {
-                pythonInterpreterPath = globalPyPath;
-            }
-            else
-            {
-                pythonInterpreterPath = GetGlobalPythonPath();
-            }
-            pythonInterpreterPath = @"C:\Users\sobha\Desktop\detectron2\Code\.venv\Scripts\python.exe";
-            pythonScriptPath = @"C:\Users\sobha\Desktop\detectron2\Code\Auto_Sewer_Document\Analyser_Batch.py";
-
-            Console.WriteLine(pythonInterpreterPath);
-            
-            if (string.IsNullOrEmpty(videoPath))
-            {
-                MessageBox.Show("Please provide a valid video path.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            if (!System.IO.File.Exists(pythonInterpreterPath))
-            {
-                MessageBox.Show("Python script file does not exist.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
             try
             {
+                // ---- progress file bootstrap ----
+                string progressPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "progress_log.json");
+                try
+                {
+                    ProgressLog progress = File.Exists(progressPath)
+                        ? JsonConvert.DeserializeObject<ProgressLog>(File.ReadAllText(progressPath)) ?? new ProgressLog()
+                        : new ProgressLog();
 
+                    progress.current_stage = "initialization";
+                    progress.progress = 0;
+                    File.WriteAllText(progressPath, JsonConvert.SerializeObject(progress, Formatting.Indented));
+                }
+                catch { /* non-fatal */ }
+
+                // ---- collect videos (supports newline ; , separators) ----
+                var videos = BrowseTextbox.Text
+                    .Split(new[] { '\r', '\n', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim().Trim('"'))
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .ToArray();
+
+                if (videos.Length == 0)
+                {
+                    MessageBox.Show("Please provide at least one video path.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                foreach (var v in videos)
+                {
+                    if (!File.Exists(v))
+                    {
+                        MessageBox.Show($"Video not found:\n{v}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                }
+
+                // ---- resolve paths ----
+                string exeDir = Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)?.Parent?.FullName
+                                ?? AppDomain.CurrentDomain.BaseDirectory;
+
+                // If your script is actually elsewhere, set it directly here:
+                string pythonScriptPath = Path.Combine(exeDir, "Analyser_Batch.py");
+                // hard override (comment out if you don’t want it forced):
+                //pythonScriptPath = @"C:\Projects\AutoSewerDocument\Analyser_Batch.py";
+
+                Console.WriteLine($"Looking for script at: {pythonScriptPath}");
+                //System.Threading.Thread.Sleep(3000); // pause to let user see the path in console
+
+                string venvPython = Path.Combine(exeDir, ".venv", "Scripts", "python.exe");
+
+                Console.WriteLine($"Looking for venv python at: {venvPython}");
+                string pythonInterpreterPath = File.Exists(venvPython)
+                    ? venvPython
+                    : GetGlobalPythonPath(); // your existing helper
+
+                Console.WriteLine($"Using Python interpreter at: {pythonInterpreterPath}");
+
+                //System.Threading.Thread.Sleep(7000); // pause to let user see the path in console
+                // hard override (comment out if you don’t want it forced):
+                //pythonInterpreterPath = @"C:\Projects\AutoSewerDocument\.venv\Scripts\python.exe";
+
+                if (!File.Exists(pythonInterpreterPath))
+                {
+                    MessageBox.Show("Python interpreter not found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                if (!File.Exists(pythonScriptPath))
+                {
+                    MessageBox.Show("Python script file does not exist.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // ---- UI: start progress timer ----
                 ProgressTemp.Enabled = true;
                 ChangeSpecificColor(ProgressTemp);
                 ShowSpecificTab(ProgressbarTab);
-                Timer timer = new Timer();
-                timer.Interval = 1000; // Every 1 seconds
+                // start the UI timer
+                var timer = new System.Windows.Forms.Timer { Interval = 1000 };
                 timer.Tick += (s, ev) => UpdateProgressBar(CircleProgressBar, ProgressBarlable);
                 timer.Start();
 
-                // Create a new process to run the Python script
-                ProcessStartInfo processInfo = new ProcessStartInfo
+                try
                 {
-                    FileName = pythonInterpreterPath,
-                    Arguments = $"\"{pythonScriptPath}\" \"{videoPath}\"", // Pass the script path and the video file path
-                    UseShellExecute = true,      // Must be true to allow shell window
-                    CreateNoWindow = false       // Allow window to be shown
-                };
+                    // build args
+                    var sb = new StringBuilder();
+                    sb.Append('"').Append(pythonScriptPath).Append('"');
+                    foreach (var v in videos)
+                        sb.Append(' ').Append('"').Append(v).Append('"');
 
-                // Start the process
-                Process process = Process.Start(processInfo);
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = pythonInterpreterPath,
+                        Arguments = sb.ToString(),
+                        UseShellExecute = true,   // keep console window
+                        CreateNoWindow = false,
+                        WindowStyle = ProcessWindowStyle.Minimized // <- keep console minimized
+                    };
 
-                // Optional: Inform user that the process has started
-                MessageBox.Show("Python script is running in the background.", "Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
+                    // marshal Exited back to UI thread
+                    proc.SynchronizingObject = this;
 
+                    proc.Exited += (s, ev2) =>
+                    {
+                        // we're back on the UI thread because of SynchronizingObject
+                        try { timer.Stop(); } catch { }
 
+                        // update progress_log.json
+                        try
+                        {
+                            var done = File.Exists(progressPath)
+                                ? JsonConvert.DeserializeObject<ProgressLog>(File.ReadAllText(progressPath)) ?? new ProgressLog()
+                                : new ProgressLog();
+                            done.current_stage = "completed";
+                            done.progress = 100;
+                            File.WriteAllText(progressPath, JsonConvert.SerializeObject(done, Formatting.Indented));
+                        }
+                        catch { /* non-fatal */ }
 
+                        // open distinct video folders
+                        var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var v in videos)
+                        {
+                            var dir = Path.GetDirectoryName(v);
+                            if (!string.IsNullOrEmpty(dir)) folders.Add(dir);
+                        }
+                        foreach (var folder in folders)
+                        {
+                            if (Directory.Exists(folder))
+                                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+                        }
 
+                        // bring app to front
+                        this.WindowState = FormWindowState.Normal;
+                        this.Activate();
+                        this.TopMost = true; this.TopMost = false;
 
+                        // cleanup
+                        proc.Dispose();
+                    };
 
+                    proc.Start();
+
+                    MessageBox.Show("Python script is running in the background.", "Information",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    try { timer.Stop(); } catch { }
+                    MessageBox.Show($"An error occurred: {ex.Message}", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"An error occurred: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                System.Threading.Thread.Sleep(3000); // pause to let user see the path in console
             }
-
-
-
         }
         private void UpdateProgressBar(Guna2CircleProgressBar progressBar, Label statusLabel)
         {
