@@ -13,6 +13,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
+using System.Net.Http;
 using static System.Net.Mime.MediaTypeNames;
 using System.Runtime.InteropServices;
 
@@ -49,6 +50,10 @@ namespace AISewerPipes
 
         // Track current tab name
         private string currentTabName;
+
+        // Python service management
+        private Process _pyService;
+        private readonly Uri _serviceBase = new Uri("http://127.0.0.1:8766");
 
         public Form1()
 		{
@@ -228,11 +233,336 @@ namespace AISewerPipes
             tabsButton.Add("AiDetectorTab", AIdetectroButton);
             tabsButton.Add("ProgressbarTab", ProgressTemp);
 
-
             // Start on the first tab (InputsTab)
             ShowTab("InputsTab");
 
+            // Start the Python service
+            StartPythonService();
         }
+
+        private void StartPythonService()
+        {
+            try
+            {
+                // Stop any existing Python processes first
+                StopExistingPythonProcesses();
+
+                // resolve paths similar to your current code
+                string exeDir = Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)?.Parent?.Parent?.FullName
+                                ?? AppDomain.CurrentDomain.BaseDirectory;
+
+                string venv = Path.Combine(exeDir, ".venv", "Scripts", "python.exe");
+                string pythonExe = File.Exists(venv) ? venv : GetGlobalPythonPath();
+                string servicePy = Path.Combine(exeDir, ".\\Auto_Sewer_Document\\service.py");
+
+                //Temp
+                //pythonExe = "C:\\Users\\sobha\\Desktop\\detectron2\\Code\\.venv\\Scripts\\python.exe";
+                //servicePy = "C:\\Users\\sobha\\Desktop\\detectron2\\Code\\Auto_Sewer_Document\\service.py";
+
+                Console.WriteLine($"Starting Python service...");
+                Console.WriteLine($"Python executable: {pythonExe}");
+                Console.WriteLine($"Service script: {servicePy}");
+
+                if (!File.Exists(pythonExe) || !File.Exists(servicePy))
+                {
+                    MessageBox.Show("Python or service.py not found.", "Error");
+                    return;
+                }
+
+                _pyService = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = pythonExe,
+                        Arguments = $"\"{servicePy}\"",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    },
+                    EnableRaisingEvents = true
+                };
+                _pyService.OutputDataReceived += (s, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.Data))
+                    {
+                        Console.WriteLine($"Python Service Output: {e.Data}");
+                    }
+                };
+                _pyService.ErrorDataReceived += (s, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.Data))
+                    {
+                        Console.WriteLine($"Python Service Error: {e.Data}");
+                    }
+                };
+
+                _pyService.Start();
+                _pyService.BeginOutputReadLine();
+                _pyService.BeginErrorReadLine();
+
+                Console.WriteLine($"Python service started with Process ID: {_pyService.Id}");
+
+                // Wait until the port is ready and log service status
+                Task.Run(async () =>
+                {
+                    using (var http = new HttpClient())
+                    {
+                        for (int i = 0; i < 50; i++)
+                        {
+                            try
+                            {
+                                var ping = await http.GetAsync(new Uri(_serviceBase, "/status"));
+                                if (ping.IsSuccessStatusCode)
+                                {
+                                    var responseContent = await ping.Content.ReadAsStringAsync();
+                                    Console.WriteLine($"Python service is ready! Status: {responseContent}");
+                                    break;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Service check attempt {i + 1}: {ex.Message}");
+                            }
+                            await Task.Delay(200);
+                        }
+                        Console.WriteLine("Service startup monitoring complete.");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to start AI service: {ex.Message}", "Error");
+            }
+        }
+
+        /// <summary>
+        /// Stops any existing Python processes before starting a new service
+        /// </summary>
+        private void StopExistingPythonProcesses()
+        {
+            try
+            {
+                // Find all Python processes
+                var pythonProcesses = Process.GetProcessesByName("python");
+
+                if (pythonProcesses.Length > 0)
+                {
+                    Console.WriteLine($"Found {pythonProcesses.Length} existing Python process(es). Stopping them...");
+
+                    foreach (var process in pythonProcesses)
+                    {
+                        try
+                        {
+                            Console.WriteLine($"Stopping Python process ID: {process.Id}");
+
+                            // Try graceful termination first
+                            if (!process.HasExited)
+                            {
+                                process.CloseMainWindow(); // Sends WM_CLOSE
+                                if (!process.WaitForExit(3000)) // Wait up to 3 seconds
+                                {
+                                    // If not exited gracefully, force kill
+                                    process.Kill();
+                                    process.WaitForExit(1000);
+                                }
+                            }
+
+                            Console.WriteLine($"Python process {process.Id} stopped successfully");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error stopping Python process {process.Id}: {ex.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("No existing Python processes found");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error checking for existing Python processes: {ex.Message}");
+                // Continue anyway - this is not critical
+            }
+        }
+
+        /// <summary>
+        /// Checks if the Python service is currently running
+        /// </summary>
+        /// <returns>True if the service is running, false otherwise</returns>
+        public bool IsPythonServiceRunning()
+        {
+            return _pyService != null && !_pyService.HasExited;
+        }
+
+        /// <summary>
+        /// Gets detailed information about the Python service status
+        /// </summary>
+        /// <returns>String containing service status information</returns>
+        public string GetServiceStatusInfo()
+        {
+            if (_pyService == null)
+                return "Service not initialized";
+
+            var status = $"Process ID: {_pyService.Id}\n";
+            status += $"Has Exited: {_pyService.HasExited}\n";
+            status += $"Exit Code: {_pyService.ExitCode}\n";
+            status += $"Start Time: {_pyService.StartTime}\n";
+
+            if (!_pyService.HasExited)
+            {
+                status += $"Is Responding: {_pyService.Responding}\n";
+                status += $"Total Processor Time: {_pyService.TotalProcessorTime}\n";
+                status += $"Private Memory Size: {_pyService.PrivateMemorySize64} bytes\n";
+            }
+
+            return status;
+        }
+
+        /// <summary>
+        /// Tests if the HTTP service is responding
+        /// </summary>
+        /// <returns>True if the HTTP service is responding, false otherwise</returns>
+        public async Task<bool> IsHttpServiceResponding()
+        {
+            try
+            {
+                using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) })
+                {
+                    var response = await http.GetAsync(new Uri(_serviceBase, "/status"));
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Tests a request to the analyze endpoint and returns detailed error information if it fails
+        /// </summary>
+        /// <param name="videoPath">Path to a test video file</param>
+        /// <returns>Detailed response information</returns>
+        public async Task<string> TestAnalyzeEndpoint(string videoPath)
+        {
+            try
+            {
+                using (var http = new HttpClient { BaseAddress = _serviceBase, Timeout = TimeSpan.FromSeconds(10) })
+                {
+                    var payload = new { video_path = videoPath };
+                    var jsonPayload = JsonConvert.SerializeObject(payload);
+                    var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                    var response = await http.PostAsync("/analyze", content);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var responseContent = await response.Content.ReadAsStringAsync();
+                        return $"✅ Success: {response.StatusCode}\n{responseContent}";
+                    }
+                    else
+                    {
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        return $"❌ Error: {response.StatusCode}\n{errorContent}";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return $"❌ Exception: {ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// Manually stops all running Python processes
+        /// </summary>
+        /// <returns>Number of processes stopped</returns>
+        public int StopAllPythonProcesses()
+        {
+            int stoppedCount = 0;
+            try
+            {
+                var pythonProcesses = Process.GetProcessesByName("python");
+
+                if (pythonProcesses.Length > 0)
+                {
+                    Console.WriteLine($"Stopping {pythonProcesses.Length} Python process(es)...");
+
+                    foreach (var process in pythonProcesses)
+                    {
+                        try
+                        {
+                            if (!process.HasExited)
+                            {
+                                process.CloseMainWindow();
+                                if (!process.WaitForExit(3000))
+                                {
+                                    process.Kill();
+                                    process.WaitForExit(1000);
+                                }
+                            }
+                            stoppedCount++;
+                            Console.WriteLine($"Stopped Python process {process.Id}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error stopping Python process {process.Id}: {ex.Message}");
+                        }
+                    }
+                }
+
+                Console.WriteLine($"Stopped {stoppedCount} Python process(es)");
+                return stoppedCount;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error stopping Python processes: {ex.Message}");
+                return stoppedCount;
+            }
+        }
+
+        /// <summary>
+        /// Displays the current service status in a message box
+        /// </summary>
+        public async void ShowServiceStatus()
+        {
+            var status = GetServiceStatusInfo();
+
+            // Check HTTP responsiveness and get detailed response
+            var httpResponding = await IsHttpServiceResponding();
+            status += $"\nHTTP Service Responding: {httpResponding}";
+
+            if (httpResponding)
+            {
+                try
+                {
+                    using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) })
+                    {
+                        var response = await http.GetAsync(new Uri(_serviceBase, "/status"));
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var serviceStatus = await response.Content.ReadAsStringAsync();
+                            status += $"\n\nService Details: {serviceStatus}";
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    status += $"\n\nError getting service details: {ex.Message}";
+                }
+            }
+
+            MessageBox.Show(status, "Python Service Status", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            // Also log to console
+            Console.WriteLine("=== PYTHON SERVICE STATUS ===");
+            Console.WriteLine(status);
+            Console.WriteLine("=============================");
+        }
+
         // Helper method to show a specific tab by index
         private void ShowTab(string tabName)
         {
@@ -398,7 +728,7 @@ namespace AISewerPipes
                 Console.WriteLine($"An error occurred: {ex.Message}");
             }
         }
-        private void StartAIdetectorButton_Click(object sender, EventArgs e)
+        private async void StartAIdetectorButton_Click(object sender, EventArgs e)
         {
             try
             {
@@ -437,42 +767,6 @@ namespace AISewerPipes
                     }
                 }
 
-                // ---- resolve paths ----
-                string exeDir = Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)?.Parent?.FullName
-                                ?? AppDomain.CurrentDomain.BaseDirectory;
-
-                // If your script is actually elsewhere, set it directly here:
-                string pythonScriptPath = Path.Combine(exeDir, "Analyser_Batch.py");
-                // hard override (comment out if you don’t want it forced):
-                //pythonScriptPath = @"C:\Projects\AutoSewerDocument\Analyser_Batch.py";
-
-                Console.WriteLine($"Looking for script at: {pythonScriptPath}");
-                //System.Threading.Thread.Sleep(3000); // pause to let user see the path in console
-
-                string venvPython = Path.Combine(exeDir, ".venv", "Scripts", "python.exe");
-
-                Console.WriteLine($"Looking for venv python at: {venvPython}");
-                string pythonInterpreterPath = File.Exists(venvPython)
-                    ? venvPython
-                    : GetGlobalPythonPath(); // your existing helper
-
-                Console.WriteLine($"Using Python interpreter at: {pythonInterpreterPath}");
-
-                //System.Threading.Thread.Sleep(7000); // pause to let user see the path in console
-                // hard override (comment out if you don’t want it forced):
-                //pythonInterpreterPath = @"C:\Projects\AutoSewerDocument\.venv\Scripts\python.exe";
-
-                if (!File.Exists(pythonInterpreterPath))
-                {
-                    MessageBox.Show("Python interpreter not found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                if (!File.Exists(pythonScriptPath))
-                {
-                    MessageBox.Show("Python script file does not exist.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
                 // ---- UI: start progress timer ----
                 ProgressTemp.Enabled = true;
                 ChangeSpecificColor(ProgressTemp);
@@ -484,82 +778,78 @@ namespace AISewerPipes
 
                 try
                 {
-                    // build args
-                    var sb = new StringBuilder();
-                    sb.Append('"').Append(pythonScriptPath).Append('"');
-                    foreach (var v in videos)
-                        sb.Append(' ').Append('"').Append(v).Append('"');
-
-                    var psi = new ProcessStartInfo
+                    // Check if service is still running before proceeding
+                    if (!IsPythonServiceRunning())
                     {
-                        FileName = pythonInterpreterPath,
-                        Arguments = sb.ToString(),
-                        UseShellExecute = true,   // keep console window
-                        CreateNoWindow = false,
-                        WindowStyle = ProcessWindowStyle.Minimized // <- keep console minimized
-                    };
+                        MessageBox.Show("Python service is not running. Please restart the application.", "Service Error");
+                        return;
+                    }
 
-                    var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-
-                    // marshal Exited back to UI thread
-                    proc.SynchronizingObject = this;
-
-                    proc.Exited += (s, ev2) =>
+                    // Check if HTTP service is responding
+                    var httpResponding = await IsHttpServiceResponding();
+                    if (!httpResponding)
                     {
-                        // we're back on the UI thread because of SynchronizingObject
-                        try { timer.Stop(); } catch { }
+                        MessageBox.Show("Python HTTP service is not responding. The service may have crashed.", "Service Error");
+                        return;
+                    }
 
-                        // update progress_log.json
-                        try
-                        {
-                            var done = File.Exists(progressPath)
-                                ? JsonConvert.DeserializeObject<ProgressLog>(File.ReadAllText(progressPath)) ?? new ProgressLog()
-                                : new ProgressLog();
-                            done.current_stage = "completed";
-                            done.progress = 100;
-                            File.WriteAllText(progressPath, JsonConvert.SerializeObject(done, Formatting.Indented));
-                        }
-                        catch { /* non-fatal */ }
-
-                        // open distinct video folders
-                        var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var http = new HttpClient { BaseAddress = _serviceBase })
+                    {
                         foreach (var v in videos)
                         {
-                            var dir = Path.GetDirectoryName(v);
-                            if (!string.IsNullOrEmpty(dir)) folders.Add(dir);
+                            try
+                            {
+                                var payload = new { video_path = v };
+                                var jsonPayload = JsonConvert.SerializeObject(payload);
+                                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+                                var resp = await http.PostAsync("/analyze", content);
+
+                                if (resp.IsSuccessStatusCode)
+                                {
+                                    var json = await resp.Content.ReadAsStringAsync();
+                                    Console.WriteLine($"✅ Analysis successful for {v}: {json}");
+                                }
+                                else
+                                {
+                                    var errorContent = await resp.Content.ReadAsStringAsync();
+                                    var errorMessage = $"❌ Analysis failed for {v}\nStatus: {resp.StatusCode}\nError: {errorContent}";
+                                    Console.WriteLine(errorMessage);
+                                    MessageBox.Show(errorMessage, "Analysis Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    return; // Stop processing further videos
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                var errorMessage = $"❌ Exception analyzing {v}: {ex.Message}";
+                                //Console.WriteLine(errorMessage);
+                                //MessageBox.Show(errorMessage, "Analysis Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                return; // Stop processing further videos
+                            }
                         }
-                        foreach (var folder in folders)
-                        {
-                            if (Directory.Exists(folder))
-                                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
-                        }
+                    }
 
-                        // bring app to front
-                        this.WindowState = FormWindowState.Normal;
-                        this.Activate();
-                        this.TopMost = true; this.TopMost = false;
+                    timer.Stop();
 
-                        // cleanup
-                        proc.Dispose();
-                    };
+                    // mark done in your progress json for UI
+                    try
+                    {
+                        var done = new { current_stage = "completed", progress = 100.0 };
+                        File.WriteAllText(progressPath, JsonConvert.SerializeObject(done, Formatting.Indented));
+                    }
+                    catch { }
 
-                    proc.Start();
-
-                    MessageBox.Show("Python script is running in the background.", "Information",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("Analysis completed.", "Info");
                 }
                 catch (Exception ex)
                 {
                     try { timer.Stop(); } catch { }
-                    MessageBox.Show($"An error occurred: {ex.Message}", "Error",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show($"Error calling AI service: {ex.Message}", "Error");
                 }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"An error occurred: {ex.Message}", "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
-                System.Threading.Thread.Sleep(3000); // pause to let user see the path in console
             }
         }
         private void UpdateProgressBar(Guna2CircleProgressBar progressBar, Label statusLabel)
@@ -755,6 +1045,26 @@ namespace AISewerPipes
             };
 
             borderRadiusTimer.Start();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            try
+            {
+                if (_pyService != null && !_pyService.HasExited)
+                {
+                    Console.WriteLine($"Stopping Python service process {_pyService.Id}");
+                    _pyService.Kill();
+                }
+
+                // Also stop any other Python processes that might be running
+                StopAllPythonProcesses();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error during form cleanup: {ex.Message}");
+            }
+            base.OnFormClosed(e);
         }
     }
 }

@@ -41,12 +41,12 @@ namespace AISewerPipes
         [STAThread]
 		static void Main()
 		{
-            //EnsureConsoleBound();            // <-- Do this BEFORE creating any forms
-            
-            //Console.Title = "My WinForms Console";
-            //Console.ForegroundColor = ConsoleColor.Gray;     // avoid black-on-black
-            //Console.Write("Hello from WinForms!");
-            //Console.WriteLine("Console ready.");
+            EnsureConsoleBound();            // <-- Do this BEFORE creating any forms
+
+            Console.Title = "My WinForms Console";
+            Console.ForegroundColor = ConsoleColor.Gray;     // avoid black-on-black
+            Console.Write("Hello from WinForms!");
+            Console.WriteLine("Console ready.");
             Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
 			Application.Run(new Form1());
